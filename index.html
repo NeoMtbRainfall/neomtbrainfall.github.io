@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Author: Paul Ergh, 2026-09-09 -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic HTML Table</title>
+    <style>
+        table {
+            width: auto;
+            border-collapse: collapse;
+            font-family: sans-serif;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        details {
+            border: 1px solid #aaa;
+            border-radius: 4px;
+            padding: 0.5em 0.5em 0;
+            margin-bottom: 10px;
+            font-family: sans-serif;
+        }
+        summary {
+            font-weight: bold;
+            margin: -0.5em -0.5em 0;
+            padding: 0.5em;
+            cursor: pointer;
+        }
+        details[open] {
+            padding: 0.5em;
+        }
+        details[open] summary {
+            border-bottom: 1px solid #aaa;
+            margin-bottom: 0.5em;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Trail Rainfall Links</h2>
+    <!-- The container where the JavaScript will insert the guide table -->
+    <div><details id="guideDetails"><summary>Guide</summary><div id="tableContainerGuide" style="margin-bottom: 20px;"></div></details></div>
+    <div><button type="button" id="buttonSetDefaults" style="margin-bottom: 10px;">Click to reset to defaults</button></div>
+    <!-- The container where the JavaScript will insert the links table -->
+    <div><details open id="standardWorkflowLinksDetails"><summary>Links for the standard workflow</summary><div id="tableContainerLinksStandard" style="margin-bottom: 20px;"></div></details></div>
+    <div><details id="fullLinksDetails"><summary>Full set of links</summary><div id="tableContainerLinksFull" style="margin-bottom: 20px;"></div></details></div>
+    <div style="display: none;" id="debugHidingContainer"><div><details id="debugDetails"><summary>Debug Info</summary><h3>Debug Info</h3><pre><div id="debugInfoContainer"></div></pre></details></div>
+    </div>
+    <div><details id="advancedDetails"><summary>Advanced Settings</summary><input id="cbTimeMode" type="checkbox" checked="true">Auto Update</input><p>The Product Readout setting shown in this screenshot shows the data value for the map location under the cursor. It can only be enabled inside of MRMS.<img id="imgProductReadoutScreenshot" src="ProductReadoutScreenshot.jpg"></p></details></div>
+Disclaimer: No warranties are provided as to whether or not this will work well for you. The weather sites could change and break this at any time and I didn't test it on a lot of browsers.
+    <script>
+        function generateTable(containerId, data) {
+            // If the array is empty, don't build a table
+            if (data.length === 0) return;
+
+            // 2. Create the core table elements
+            const table = document.createElement("table");
+            const thead = document.createElement("thead");
+            const tbody = document.createElement("tbody");
+
+            // 3. Create the Header Row (thead)
+            const headerRow = document.createElement("tr");
+            
+            // Extract the keys from the first object to use as column headers
+            const keys = Object.keys(data[0]); 
+            
+            keys.forEach(key => {
+                const th = document.createElement("th");
+                // Capitalize the first letter of each key for a clean layout
+                th.textContent = key.charAt(0).toUpperCase() + key.slice(1);
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // 4. Create the Data Rows (tbody)
+            data.forEach(item => {
+                const row = document.createElement("tr");
+
+                keys.forEach(key => {
+                    const td = document.createElement("td");
+                    // Using textContent safely escapes data and avoids HTML injection bugs
+                    td.innerHTML = item[key];
+                    //td.textContent = item[key]; 
+                    row.appendChild(td);
+                });
+
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+
+            // 5. return the completed table
+            return table;
+        }
+
+        function addContentToContainer(containerId, content, clearExistingContent = true, htmlEscape = false) {
+            const container = document.getElementById(containerId);
+            if (clearExistingContent) {
+                container.innerHTML = "";
+            }
+            if (htmlEscape) {
+                container.textContent += content.toString();
+            } else {
+                container.append(content);
+            }
+        }
+
+        function showElement(elementId) {
+            // Find the element and change its display back to block
+            document.getElementById(elementId).style.display = "block";
+        }
+
+        function hideElement(elementId) {
+            // Find the element and change its display to none
+            document.getElementById(elementId).style.display = "none";
+        }
+
+        function setCookie2(name, encodedValue, maxAge){
+            document.cookie = `${name}=${encodedValue}; max-age=${maxAge}; path=/; SameSite=Lax; Secure`;
+        }
+
+        function setCookie(name, value, updateInMemory = true) {
+            if (Array.isArray(value)) {
+                throw new TypeError(`${name} must not be an array`);
+            }
+
+            // Always encode values to handle spaces or special characters safely
+            const encodedValue = encodeURIComponent(value);
+            
+            // Calculate expiration in seconds
+            const maxAge = maxCookieAge;
+            
+            if (updateInMemory) {
+                myCookies[name] = value; // Update the in-memory representation of cookies
+            }
+
+            // Construct and assign the cookie string
+            setCookie2(name, encodedValue, maxAge);
+
+            return value;
+        }
+
+        function setStringArrayCookie(name, values, updateInMemory = true) {
+            if (!Array.isArray(values)) {
+                throw new TypeError(`${name} must be an array`);
+            }
+
+            if (!values.every(value => typeof value === "string")) {
+                throw new TypeError(`${name} must contain only strings`);
+            }
+
+            const serialized = JSON.stringify(values);
+            const encodedValue = encodeURIComponent(serialized);
+
+            const maxAge = maxCookieAge; // Use the constant for max age
+
+            if (updateInMemory) {
+                myCookies[name] = values;
+            }
+
+            setCookie2(name, encodedValue, maxAge);
+
+            return values;
+        }
+
+        function getCookie(name, updateInMemory = true) {
+            const cookiesMap = document.cookie.split("; ").reduce((acc, currentCookie) => {
+                const [key, value] = currentCookie.split("=");
+                if (key) {
+                    acc[key] = decodeURIComponent(value); // Decode special characters
+                }
+                return acc;
+            }, {});
+
+            if (updateInMemory) {
+                myCookies[name] = cookiesMap[name];
+            }
+
+            return cookiesMap[name] || null;
+        }
+
+        function setMyCookieAndReturn(name, value, updateInMemory = true)
+        {
+            if (updateInMemory){
+                myCookies[name] = value;
+            }
+            return value;
+        }
+
+        function getStringArrayCookie(name, updateInMemory = true) {
+            const rawValue = getCookie(name);
+            var defaultValue = [];
+
+            if (rawValue === null) {
+                return setStringArrayCookie(name, defaultValue, updateInMemory);
+            }
+
+            try {
+                const parsed = JSON.parse(rawValue);
+
+                if (
+                    Array.isArray(parsed) &&
+                    parsed.every(value => typeof value === "string")
+                ) {
+                    // The cookie has a valid value, so we don't need to set the cookie, just return it
+                    return setMyCookieAndReturn(name, parsed, updateInMemory);
+                }
+
+                console.warn(
+                    `Cookie "${name}" did not contain a valid string array:`,
+                    parsed
+                );
+
+                return setStringArrayCookie(name, defaultValue, updateInMemory);
+
+            } catch (error) {
+                console.warn(
+                    `Could not parse cookie "${name}":`,
+                    rawValue,
+                    error
+                );
+
+                return setStringArrayCookie(name, defaultValue, updateInMemory);
+            }
+        }
+
+        function deleteCookie(name, updateInMemory = true) {
+            document.cookie =
+                `${name}=; ` +
+                `max-age=0; ` +
+                `path=/; ` +
+                `SameSite=Lax`;
+
+            if (updateInMemory) {
+                delete myCookies[name];
+            }
+        }
+
+        const config = {
+            "valuesToCopyFromTrail": [
+                "trailName"
+            ],
+            "valuesToCopyFromTrailParameters": [
+                "clon",
+                "clat",
+                "zoom"
+            ],
+            "standardWorkflowViews": [
+                "Q3EVAP1H",
+                "Q3EVAP3H",
+                "Q3EVAP6H",
+                "P2_Q3MS24H",
+                "P2_Q3MS72H"
+            ],
+            "products": [
+                {
+                    "productType": "q3rads",
+                    "description": "Q3 Radar Only",
+                    "productCodesBase": [
+                        { "code": "Q3EVAP", "description": "" }
+                    ],
+                    "durations": [
+                        {
+                            "code": "RATE",
+                            "description": "Current Rate",
+                            "ordinal": "0"
+                        },
+                        {
+                            "code": "15M",
+                            "description": "15 minutes",
+                            "ordinal": "1"
+                        },
+                        {
+                            "code": "1H",
+                            "description": "1 hour",
+                            "ordinal": "2"
+                        },
+                        {
+                            "code": "3H",
+                            "description": "3 hours",
+                            "ordinal": "3"
+                        },
+                        {
+                            "code": "6H",
+                            "description": "6 hours",
+                            "ordinal": "4"
+                        },
+                        {
+                            "code": "12H",
+                            "description": "12 hours",
+                            "ordinal": "5"
+                        },
+                        {
+                            "code": "24H",
+                            "description": "24 hours",
+                            "ordinal": "6"
+                        },
+                        {
+                            "code": "48H",
+                            "description": "48 hours",
+                            "ordinal": "7"
+                        },
+                        {
+                            "code": "72H",
+                            "description": "72 hours",
+                            "ordinal": "8"
+                        }
+                    ]
+                },
+                {
+                    "productType": "q3mss",
+                    "description": "Q3 Multi-Sensor",
+                    "productCodesBase": [
+                        { "code": "P1_Q3MS", "description": "Pass1" },
+                        { "code": "P2_Q3MS", "description": "Pass2" }
+                    ],
+                    "durations": [
+                        {
+                            "code": "1H",
+                            "description": "1 hour",
+                            "ordinal": "0"
+                        },
+                        {
+                            "code": "3H",
+                            "description": "3 hours",
+                            "ordinal": "1"
+                        },
+                        {
+                            "code": "6H",
+                            "description": "6 hours",
+                            "ordinal": "2"
+                        },
+                        {
+                            "code": "12H",
+                            "description": "12 hours",
+                            "ordinal": "3"
+                        },
+                        {
+                            "code": "24H",
+                            "description": "24 hours",
+                            "ordinal": "4"
+                        },
+                        {
+                            "code": "48H",
+                            "description": "48 hours",
+                            "ordinal": "5"
+                        },
+                        {
+                            "code": "72H",
+                            "description": "72 hours",
+                            "ordinal": "6"
+                        }
+                    ]
+                }
+            ],
+            "defaultValues": {
+                "baseUrl": "https://mrms.nssl.noaa.gov/qvs/product_viewer/index.php",
+                "trailName": "",
+                "description": "",
+                "shortDescription": "",
+                "parameters": {
+                    "web_exec_mode": "run",
+                    "menu": "menu_config.txt",
+                    "year": "",
+                    "month": "",
+                    "day": "",
+                    "hour": "",
+                    "minute": "",
+                    "time_mode": "update",
+                    "zoom": "",
+                    "clon": "",
+                    "clat": "",
+                    "base": "0",
+                    "overlays": "1",
+                    "mping_mode": "0",
+                    "product_type": "",
+                    "product": "",
+                    "qpe_pal_option": "3",
+                    "opacity": "0.3",
+                    "looping_active": "off",
+                    "num_frames": "6",
+                    "frame_step": "200",
+                    "seconds_step": "600"
+                }
+            },
+            "trails": [
+                { "trailName":"Austin Badger", "clat":"41.114784648104916", "clon":"-81.80218704066162", "zoom":"15" },
+                { "trailName":"Bedford", "clat":"41.374368366844465", "clon":"-81.55355929638672", "zoom":"14" },
+                { "trailName":"Big Creek", "clat":"41.62063843727802", "clon":"-81.20398758141113", "zoom":"15" },
+                { "trailName":"Camp Tuscazoar", "clat":"40.561940009893505", "clon":"-81.40358949783203", "zoom":"14" },
+                { "trailName":"East Rim", "clat":"41.25912084440941", "clon":"-81.52903398451905", "zoom":"15" },
+                { "trailName":"Hampton Hills", "clat":"41.155774521399934", "clon":"-81.55770969507813", "zoom":"15" },
+                { "trailName":"Lake Milton", "clat":"41.061981822179774", "clon":"-80.97117417494873", "zoom":"15" },
+                { "trailName":"Medina Trails", "clat":"41.15492378425358", "clon":"-81.83640766143786", "zoom":"15" },
+                { "trailName":"Mohican State Park", "clat":"40.611393996662144", "clon":"-82.29015159606953", "zoom":"14" },
+                { "trailName":"OECR Primitive Loop", "clat":"41.433200628666924", "clon":"-81.66203203173828", "zoom":"15" },
+                { "trailName":"Quail Hollow", "clat":"40.97968635184637", "clon":"-81.30839738931152", "zoom":"15" },
+                { "trailName":"Royalview", "clat":"41.30289279021471", "clon":"-81.79757770373536", "zoom":"15" },
+                { "trailName":"Thorn (FTP)", "clat":"41.13112119615738", "clon":"-82.20990434390625", "zoom":"15" },
+                { "trailName":"West Branch", "clat":"41.12827708625872", "clon":"-81.1192556742749", "zoom":"14" },
+                { "trailName":"West Creek", "clat":"41.38230261951239", "clon":"-81.69478684124756", "zoom":"15" }
+            ],
+            "guideData": [
+                {"Your question": "Rain in the last hour?", "Viewer selection": "Q3 Radar Only → 1 hr"},
+                {"Your question": "Rain over roughly the last few hours?", "Viewer selection": "Q3 Radar Only → 3 hr and 6 hr"},
+                {"Your question": "Wetness from today's rain?", "Viewer selection": "Q3 Multi-Sensor Pass 2 → 24 hr"},
+                {"Your question": "Is the ground carrying several days of moisture?", "Viewer selection": "Q3 Multi-Sensor Pass 2 → 72 hr"}
+            ],
+            "constants": [
+                { "name": "MAX_COOKIE_AGE_SECONDS", "value": 315360000, "description": "~10 years in seconds" }
+            ]
+        };
+
+        function BuildLink(id, options){
+            const { linkText, linkHover, baseUrl, parameters, bold = false, actions = null } = options;
+            var result = "";
+            if (!baseUrl && !actions) {
+                throw new Error("Either baseUrl or actions must be provided");
+            }
+
+            result = `<a id="${id || ''}" href="${baseUrl ? baseUrl + (parameters ? `?${(new URLSearchParams(parameters)).toString()}"` : '') : (`javascript:void(0);" role='button' tabindex='0'`)} ${bold ? "style='font-weight: bold;'" : ""} ${linkHover ? `title='${linkHover}'` : ''} ${baseUrl ? "target='_blank'" : ''}>${linkText ? linkText : ''}</a>`;
+            
+            if (actions){
+                actions.forEach(action => {
+                    if (action.event && action.parameter) {
+                        switch(action.event) {
+                            case "hideTrail":
+                                queueAddEventListener(id, "click", (event) => {
+                                    hideTrail(action.parameter);
+                                });
+                                queueAddEventListener(id, "keypress", (event) => {
+                                    if (event.key === "Enter" || event.key === ' ') {
+                                        event.preventDefault(); // Prevent default action for space key
+                                        hideTrail(actions.parameter);
+                                    }
+                                });
+                                break;
+                            default:
+                                console.warn(`Unknown action event: ${actions.event}`);
+                        }
+                    }
+                });
+            }
+
+            return result;
+        }
+
+        function createTableData(stardardWorkflowViewsOnly = true) {
+            try {
+                const now = new Date();
+                var trails = [];
+                var productCounter = [];
+
+                config.trails.forEach(trail => {
+                    //logMessage(`Processing trail: ${trail.trailName}\n`);
+
+                    if (myCookies.trailsHidden && myCookies.trailsHidden.includes(trail.trailName)) {
+                        logMessage(`Skipping trail: ${trail.trailName} (hidden)\n`);
+                        return; // Skip this trail if it's hidden, acts like continue in a forEach loop
+                    }
+
+                    const urlTrail = structuredClone(config.defaultValues);
+                    urlTrail.parameters.year = now.getFullYear();
+                    urlTrail.parameters.month = now.getMonth() + 1;
+                    urlTrail.parameters.day = now.getDate();
+                    urlTrail.parameters.hour = now.getHours();
+                    urlTrail.parameters.minute = now.getMinutes();
+                    urlTrail.parameters.time_mode = myCookies.autoUpdateTimeMode;
+
+                    //logMessage(`urlTrail: ${JSON.stringify(urlTrail, null, 2)}\n`);
+
+                    var trailTableRowData = {};
+                    trailTableRowData.trailName = trail.trailName;
+
+                    config.valuesToCopyFromTrail.forEach(element => {
+                        urlTrail[element] = trail[element];
+                    });
+
+                    config.valuesToCopyFromTrailParameters.forEach(element => {
+                        urlTrail.parameters[element] = trail[element];
+                    });
+
+                    config.products.forEach(product => {
+                        var urlTrailProduct = structuredClone(urlTrail);
+                        urlTrailProduct.parameters.product_type = product.productType;
+                        product.productCodesBase.forEach(productCode => {
+                            var urls = [];
+                            var productKey = "";
+                            if (productCode.description) {
+                                productKey = product.description + " - " + productCode.description;
+                            } else {
+                                productKey = product.description;
+                            }
+
+                            product.durations.forEach(duration => {
+                                const viewKey = productCode.code + duration.code;
+                                if (stardardWorkflowViewsOnly && !config.standardWorkflowViews.includes(viewKey)) { return; } // Skip this duration if it's not in the standard workflow views
+                                var urlTrailProductDuration = structuredClone(urlTrailProduct);
+                                urlTrailProductDuration.parameters.product = viewKey;
+                                urlTrailProductDuration.shortDescription = duration.code;
+                                if (productCode.description) {
+                                    urlTrailProductDuration.description =
+                                        trail.trailName + " - " +
+                                        productKey + " - " +
+                                        duration.description;
+                                } else {
+                                    urlTrailProductDuration.description =
+                                        trail.trailName + " - " +
+                                        productKey + " - " +
+                                        duration.description;
+                                }
+                                //productCounter[productKey] = (productCounter[productKey] || 0) + 1;
+                                urls.push(urlTrailProductDuration);
+                            });
+
+                            var first=true;
+                            urls.forEach(urlTrailProductDuration => {
+                                const bold = (!stardardWorkflowViewsOnly && config.standardWorkflowViews.includes(urlTrailProductDuration.parameters.product));
+
+                                if (first) {
+                                    first = false;
+                                    trailTableRowData[productKey] = "";
+                                } else {
+                                        trailTableRowData[productKey] += " | ";
+                                }
+                                const link = BuildLink(
+                                    `link-${trail.trailName.replace(/\s+/g, '-')}-${urlTrailProductDuration.parameters.product}`,
+                                     {
+                                        linkText: urlTrailProductDuration.shortDescription,
+                                        linkHover: urlTrailProductDuration.description,
+                                        baseUrl: urlTrailProductDuration.baseUrl,
+                                        parameters: urlTrailProductDuration.parameters,
+                                        bold: bold
+                                     }
+                                );
+                                //logMessage(`Trail: ${trail.trailName}, Product: ${productKey}, Duration: ${urlTrailProductDuration.shortDescription}, Link: ${link}`);
+                                trailTableRowData[productKey] += link;
+                            });
+                        });
+                    });
+                    const hideLink = BuildLink(`link-hide-${trail.trailName.replace(/\s+/g, '-')}`,{
+                        linkText: "Hide this trail",
+                        linkHover: "Click to hide this trail from the table",
+                        baseUrl: null,
+                        parameters: null,
+                        actions: [{
+                            event: "hideTrail",
+                            parameter: trail.trailName
+                        }]
+                    });
+                    trailTableRowData["Actions"] = hideLink;
+                    //logMessage(`Adding hide link for trail: ${trail.trailName}. Link HTML: ${hideLink}`);
+
+                    trails.push(trailTableRowData);
+                });
+
+                return trails;
+            }
+            catch (error) {
+                //console.error("Error occurred:", error);
+                logMessage("An error occurred while processing the script.\nError details: " + error.message);
+                return null;
+            }
+        }
+
+        function showAlert(message) {
+            if (alertFlag) {
+                alert(message);
+                alertFlag = false;
+            }
+        }
+
+        function hideTrail(trailName) {
+            logMessage(`Hiding trail: ${trailName}`);
+            if (!myCookies.trailsHidden.includes(trailName)) {
+                setStringArrayCookie(
+                    "trailsHidden",
+                    [...myCookies.trailsHidden, trailName],
+                    true // Update in memory
+                );
+            }
+            Load();
+        }
+
+        const cookieDefaults = {
+            "guideDetailsCollapsed": true,
+            "standardWorkflowLinksDetailsCollapsed": false,
+            "fullLinksDetailsCollapsed": true,
+            "debugDetailsCollapsed": true,
+            "autoUpdateTimeMode": "update"
+        };
+
+        const cookieDefaultsArrays = {
+            "trailsHidden": []
+        };
+
+        function setCookieDefaults(updateInMemory = true) {
+            logMessage("setCookieDefaults() starting...");
+            for (const [name, defaultValue] of Object.entries(cookieDefaults)) {
+                setCookie(name, defaultValue, updateInMemory);
+            }
+            for (const [name, defaultValue] of Object.entries(cookieDefaultsArrays)) {
+                setStringArrayCookie(name, defaultValue, updateInMemory);
+            }
+            LogCookies();
+        }
+
+        function getCookieOrDefault(name, updateInMemory = true) {
+            const cookieValue = getCookie(name, updateInMemory);
+
+            if (cookieValue === null) {
+                if (!Object.hasOwn(cookieDefaults, name)) {
+                    throw new Error(`No default cookie value defined for "${name}"`);
+                }
+
+                return setCookie(
+                    name,
+                    cookieDefaults[name],
+                    updateInMemory
+                );
+            }
+
+            return cookieValue;
+        }
+
+        function getStringArrayCookieOrDefault(name, updateInMemory = true) {
+            if (!Object.hasOwn(cookieDefaultsArrays, name)) {
+                throw new Error(
+                    `No array cookie default defined for "${name}"`
+                );
+            }
+
+            const defaultValue =
+                structuredClone(cookieDefaultsArrays[name]);
+
+            const cookieValue =
+                getStringArrayCookie(name, updateInMemory);
+
+            if (cookieValue === null) {
+                return setStringArrayCookie(
+                    name,
+                    defaultValue,
+                    updateInMemory
+                );
+            }
+
+            return cookieValue;
+        }
+
+        function ReadMyCookies() {
+            var cookies = {};
+
+            Object.keys(cookieDefaults).forEach(key => {
+                cookies[key] = getCookieOrDefault(key);
+            });
+
+            Object.keys(cookieDefaultsArrays).forEach(key =>{
+                cookies[key] = getStringArrayCookieOrDefault(key);
+            });
+
+            return cookies;
+        }
+
+        function getAllCookies() {
+            return document.cookie
+                .split(";")
+                .map(cookie => cookie.trim())
+                .filter(Boolean)
+                .reduce((result, cookie) => {
+                    const separatorIndex = cookie.indexOf("=");
+
+                    const name = cookie.substring(0, separatorIndex);
+                    const rawValue = cookie.substring(separatorIndex + 1);
+
+                    try {
+                        result[name] = decodeURIComponent(rawValue);
+                    } catch {
+                        result[name] = rawValue;
+                    }
+
+                    return result;
+                }, {});
+        }
+
+        function deleteAllCookies(updateInMemory = true) {
+            const cookies = getAllCookies();
+            for (const name in cookies) {
+                deleteCookie(name, updateInMemory);
+            }
+        }
+
+        function LogCookies(reason) {
+            logMessage(`LogCookies(${reason}) starting`);
+            logMessage(`Cookies: ${JSON.stringify(getAllCookies(), null, 2)}`);
+            logMessage(`Current cookies in memory: ${JSON.stringify(myCookies, null, 2)}`);
+        }
+
+        function InitializeDetailsToggles() {
+            const detailsIds = [
+                "guideDetails",
+                "standardWorkflowLinksDetails",
+                "fullLinksDetails",
+                "debugDetails"
+            ];
+
+            detailsIds.forEach(id => {
+                const details = document.getElementById(id);
+                const cookieName = `${id}Collapsed`;
+                const isCollapsed = myCookies[cookieName] === "true" || myCookies[cookieName] === true;
+
+                // Set the initial state based on the cookie
+                details.open = !isCollapsed;
+
+                // Add an event listener to update the cookie when toggled
+                details.addEventListener('toggle', (event) => {
+                    if (details.open) {
+                        setCookie(`${id}Collapsed`, false, true);
+                    } else {
+                        setCookie(`${id}Collapsed`, true, true);
+                    }
+                });
+            });
+        }
+
+        function generateTables(){
+
+            const standardWorkflowTableData = createTableData(true);
+            const fullTableData = createTableData(false);
+
+            // Run the function with our dataset
+            const standardWorkflowTable = generateTable("table-container-links-standard", standardWorkflowTableData);
+            const fullTable = generateTable("table-container-links-full", fullTableData);
+            const guideTable = generateTable("table-container-guide", config.guideData);
+
+            if (debug){
+                debugInfo += (debugInfo.length>0) ? "\n" : "" +
+                    "Current Date and Time: " + new Date().toString() + "\n" +
+                    //"Number of Trails: " + config.trails.length + "\n" +
+                    //"Number of Products: " + config.products.length + "\n" +
+                    //"config: " + JSON.stringify(config, null, 2) + "\n" +
+                    //"Standard Workflow Table Data: " + JSON.stringify(standardWorkflowTableData, null, 2) + "\n" +
+                    //"Full Table Data: " + JSON.stringify(fullTableData, null, 2) + "\n" +
+                    //"standardWorkflowTable: " + (standardWorkflowTable ? standardWorkflowTable.outerHTML : "null") + "\n" +
+                    //"fullTable: " + (fullTable ? fullTable.outerHTML : "null") + "\n" +
+                    //"guideTable: " + (guideTable ? guideTable.outerHTML : "null") + "\n" +
+                    "log:\n" + log + "\n";
+            }
+
+            addContentToContainer(
+                "tableContainerLinksStandard",
+                standardWorkflowTable);
+
+            addContentToContainer(
+                "tableContainerLinksFull",
+                fullTable);
+
+            addContentToContainer(
+                "tableContainerGuide",
+                guideTable);
+
+            if(debug){
+                addContentToContainer(
+                    "debugInfoContainer",
+                    debugInfo,
+                    htmlEscape = true);
+                
+                showElement("debugHidingContainer");
+            }
+
+            attachQueuedEventListeners();
+
+        }
+
+        function Load()
+        {
+            LogCookies("Load(): starting...");
+            myCookies = ReadMyCookies();
+            InitializeDetailsToggles();
+            LogCookies("Load(): after ReadMyCookies()");
+
+            generateTables();
+        }
+
+        function OnLoad() {
+            Load();
+            QueueAndAttachEventListener("buttonSetDefaults", "click", () => {
+                LogCookies("Before setCookieDefaults()");
+                setCookieDefaults();
+                LogCookies("After setCookieDefaults()");
+                Load();
+            });            
+            QueueAndAttachEventListener("cbTimeMode", "change", (event) => {
+                if (event.target.checked) {
+                    setCookie("autoUpdateTimeMode", "update");
+                    logMessage("time mode set to auto update");
+                } else {
+                    logMessage("time mode set to static");
+                    setCookie("autoUpdateTimeMode", "static");
+                }
+                Load();
+            });
+const checkbox = document.getElementById('myCheckbox');
+
+checkbox.addEventListener('change', (event) => {
+  if (event.target.checked) {
+    console.log("Checkbox is checked! ✅");
+    // Run code for 'ON' state
+  } else {
+    console.log("Checkbox is unchecked! ❌");
+    // Run code for 'OFF' state
+  }
+});
+
+
+        }
+
+        function QueueAndAttachEventListener(elementId, eventType, callback) {
+            queueAddEventListener(elementId, eventType, callback);
+            attachQueuedEventListeners();
+        }
+
+        function queueAddEventListener(elementId, eventType, callback) {
+            eventListenersToAdd.push({ elementId, eventType, callback });
+        }
+
+        function attachQueuedEventListeners() {
+            try{
+                eventListenersToAdd.forEach(listener => {
+                    const { elementId, eventType, callback } = listener;
+                    const element = document.getElementById(elementId);
+                    if (element) {
+                        element.addEventListener(eventType, callback);
+                        //logMessage(`Event listener for '${eventType}' added to element with ID '${elementId}'.`);
+                    } else {
+                        logMessage(`Element with ID '${elementId}' not found.`);
+                    }
+                });
+                eventListenersToAdd = [];
+            }
+            catch (error) {
+                logMessage(`Error attaching event listeners: ${error.message}`);
+            }
+        }
+
+        const debug = false; // Set to true to enable debug information, false to disable
+        var log = "";
+        var myCookies = {};
+        var alertFlag = true;
+        var eventListenersToAdd = [];
+        var debugInfo = "";
+        const maxCookieAge = config.constants.find(constant => constant.name === "MAX_COOKIE_AGE_SECONDS").value;
+        function logMessage(message) { 
+            if(debug){
+                log += message + "\n";
+                console.log(message);
+            }
+        }
+
+        OnLoad();
+    </script>
+
+</body>
+</html>
