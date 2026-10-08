@@ -12,6 +12,11 @@
 
         See the LICENSE file for the full license text.
     -->
+    <!---
+        Version History:
+        2026-09-09, v1.0.0: Initial release
+        2026-10-08, v1.1.0: Added configurable toggle button code.  Added toggle button for ignoring hidden trails.
+    -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NE Ohio MTB Rainfall</title>
@@ -60,9 +65,9 @@
     <h2>NE Ohio MTB Rainfall</h2>
     <!-- The container where the JavaScript will insert the guide table -->
     <div><details id="guideDetails"><summary>Guide</summary><div id="tableContainerGuide" style="margin-bottom: 20px;"></div></details></div>
-    <div><button type="button" id="buttonSetDefaults" style="margin-bottom: 10px;">Click to reset to defaults</button></div>
+    <div><button type="button" id="buttonSetDefaults" style="margin-bottom: 10px;">Click to reset to defaults</button> <button type="button" id="toggleButtonIgnoreHiddenTrails" style="margin-bottom: 10px;">placeholder text</button></div>
     <!-- The container where the JavaScript will insert the links table -->
-    <div><details open id="standardWorkflowLinksDetails"><summary>Links for the standard workflow</summary><div id="tableContainerLinksStandard" style="margin-bottom: 20px;"></div></details></div>
+    <div><details id="standardWorkflowLinksDetails"><summary>Links for the standard workflow</summary><div id="tableContainerLinksStandard" style="margin-bottom: 20px;"></div></details></div>
     <div><details id="fullLinksDetails"><summary>Full set of links</summary><div id="tableContainerLinksFull" style="margin-bottom: 20px;"></div></details></div>
     <div style="display: none;" id="debugHidingContainer"><div><details id="debugDetails"><summary>Debug Info</summary><h3>Debug Info</h3><pre><div id="debugInfoContainer"></div></pre></details></div>
     </div>
@@ -426,9 +431,21 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
                 {"Your question": "Wetness from today's rain?", "Viewer selection": "Q3 Multi-Sensor Pass 2 → 24 hr"},
                 {"Your question": "Is the ground carrying several days of moisture?", "Viewer selection": "Q3 Multi-Sensor Pass 2 → 72 hr"}
             ],
-            "constants": [
-                { "name": "MAX_COOKIE_AGE_SECONDS", "value": 315360000, "description": "~10 years in seconds" }
-            ]
+            "constants": {
+                "MAX_COOKIE_AGE_SECONDS": {
+                    "value": 315360000,
+                    "description": "~10 years in seconds"
+                },
+                "toggleButtons": {
+                    "toggleButtonIgnoreHiddenTrails": {
+                        "true": "Respect hidden trail setting",
+                        "false": "Ignore hidden trail setting",
+                        "function": "toggleButton('toggleButtonIgnoreHiddenTrails')",
+                        "cookie": "toggleButtonIgnoreHiddenTrails",
+                        "default": false
+                    }
+                }
+            }
         };
 
         function BuildLink(id, options){
@@ -444,14 +461,14 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
                 actions.forEach(action => {
                     if (action.event && action.parameter) {
                         switch(action.event) {
-                            case "hideTrail":
+                            case "toggleTrailHiding":
                                 queueAddEventListener(id, "click", (event) => {
-                                    hideTrail(action.parameter);
+                                    toggleTrailHiding(action.parameter);
                                 });
                                 queueAddEventListener(id, "keypress", (event) => {
                                     if (event.key === "Enter" || event.key === ' ') {
                                         event.preventDefault(); // Prevent default action for space key
-                                        hideTrail(actions.parameter);
+                                        toggleTrailHiding(actions.parameter);
                                     }
                                 });
                                 break;
@@ -465,16 +482,49 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
             return result;
         }
 
+        function IsTrailHidden(trailName) {
+            if (myCookies.trailsHidden && myCookies.trailsHidden.includes(trailName)) {
+                //logMessage(`Trail is hidden: ${trailName}`);
+                return true;
+            }
+            //logMessage(`Trail is visible: ${trailName}`);
+            return false;
+        }
+
+        function ToggleValue(cookieName) {
+            const currentValue = myCookies[cookieName];
+            return (currentValue === "true" || currentValue === true);
+        }
+
+        function IsTrailVisible(trailName) {
+
+            if (ToggleValue("toggleButtonIgnoreHiddenTrails")) {
+                logMessage(`Ignoring hidden trail setting due to toggle button being true. Showing trail: ${trailName}`);
+                return true;
+            }
+
+            if (IsTrailHidden(trailName)) {
+                logMessage(`Trail is hidden: ${trailName}`);
+                return false;
+            }
+
+            logMessage(`Trail is visible: ${trailName}`);
+            return true;
+        }
+
         function createTableData(stardardWorkflowViewsOnly = true) {
             try {
                 const now = new Date();
                 var trails = [];
                 var productCounter = [];
+                const ignoreHiddenTrails = ToggleValue("toggleButtonIgnoreHiddenTrails");
 
                 config.trails.forEach(trail => {
                     //logMessage(`Processing trail: ${trail.trailName}\n`);
 
-                    if (myCookies.trailsHidden && myCookies.trailsHidden.includes(trail.trailName)) {
+                    const isTrailHidden = IsTrailHidden(trail.trailName);
+                    const isTrailVisible = IsTrailVisible(trail.trailName);
+                    if (!isTrailVisible) {
                         logMessage(`Skipping trail: ${trail.trailName} (hidden)\n`);
                         return; // Skip this trail if it's hidden, acts like continue in a forEach loop
                     }
@@ -558,18 +608,36 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
                             });
                         });
                     });
-                    const hideLink = BuildLink(`link-hide-${trail.trailName.replace(/\s+/g, '-')}`,{
-                        linkText: "Hide this trail",
-                        linkHover: "Click to hide this trail from the table",
-                        baseUrl: null,
-                        parameters: null,
-                        actions: [{
-                            event: "hideTrail",
-                            parameter: trail.trailName
-                        }]
-                    });
-                    trailTableRowData["Actions"] = hideLink;
-                    //logMessage(`Adding hide link for trail: ${trail.trailName}. Link HTML: ${hideLink}`);
+
+                    if(ignoreHiddenTrails && isTrailHidden) {                        
+
+                        const showLink = BuildLink(`link-toggleHiding-${trail.trailName.replace(/\s+/g, '-')}`,{
+                            linkText: "Show",
+                            linkHover: "Click to show this trail in the table",
+                            baseUrl: null,
+                            parameters: null,
+                            actions: [{
+                                event: "toggleTrailHiding",
+                                parameter: trail.trailName
+                            }]
+                        });
+
+                        trailTableRowData["Actions"] = showLink;
+
+                    } else {
+                        const hideLink = BuildLink(`link-toggleHiding-${trail.trailName.replace(/\s+/g, '-')}`,{
+                            linkText: "Hide",
+                            linkHover: "Click to hide this trail from the table",
+                            baseUrl: null,
+                            parameters: null,
+                            actions: [{
+                                event: "toggleTrailHiding",
+                                parameter: trail.trailName
+                            }]
+                        });
+
+                        trailTableRowData["Actions"] = hideLink;
+                    }
 
                     trails.push(trailTableRowData);
                 });
@@ -590,12 +658,18 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
             }
         }
 
-        function hideTrail(trailName) {
-            logMessage(`Hiding trail: ${trailName}`);
+        function toggleTrailHiding(trailName) {
+            logMessage(`Toggling trail: ${trailName}`);
             if (!myCookies.trailsHidden.includes(trailName)) {
                 setStringArrayCookie(
                     "trailsHidden",
                     [...myCookies.trailsHidden, trailName],
+                    true // Update in memory
+                );
+            } else {
+                setStringArrayCookie(
+                    "trailsHidden",
+                    myCookies.trailsHidden.filter(name => name !== trailName),
                     true // Update in memory
                 );
             }
@@ -616,26 +690,43 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
 
         function setCookieDefaults(updateInMemory = true) {
             logMessage("setCookieDefaults() starting...");
+            LogCookies("At setCookieDefaults() start");
+
+            // start by deleting all cookies to ensure a clean slate
+            deleteAllCookies();
+
             for (const [name, defaultValue] of Object.entries(cookieDefaults)) {
                 setCookie(name, defaultValue, updateInMemory);
             }
             for (const [name, defaultValue] of Object.entries(cookieDefaultsArrays)) {
                 setStringArrayCookie(name, defaultValue, updateInMemory);
             }
-            LogCookies();
+            for(const [buttonId, buttonConfig] of Object.entries(config.constants.toggleButtons)) {
+                logMessage(`Setting default for toggle button: ${buttonId}, cookie: ${buttonConfig.cookie}, default: ${buttonConfig.default}`);
+                logMessage(`toggleButtonConfig config.constants.toggleButtons[${buttonId}]: ${JSON.stringify(buttonConfig, null, 2)}`);
+                setCookie(buttonConfig.cookie, buttonConfig.default, updateInMemory);
+            }
+            LogCookies("At setCookieDefaults() end");
         }
 
         function getCookieOrDefault(name, updateInMemory = true) {
             const cookieValue = getCookie(name, updateInMemory);
+            let cookieDefault = null;
 
             if (cookieValue === null) {
-                if (!Object.hasOwn(cookieDefaults, name)) {
+
+                if (Object.hasOwn(config.constants.toggleButtons, name) || Object.values(config.constants.toggleButtons).some(buttonConfig => buttonConfig.cookie === name)) {
+                    // Handle toggle button cookies
+                    cookieDefault = Object.values(config.constants.toggleButtons).find(buttonConfig => buttonConfig.cookie === name)?.default;
+                } else if (Object.hasOwn(cookieDefaults, name)) {
+                    cookieDefault = cookieDefaults[name];
+                } else {
                     throw new Error(`No default cookie value defined for "${name}"`);
                 }
 
                 return setCookie(
                     name,
-                    cookieDefaults[name],
+                    cookieDefault,
                     updateInMemory
                 );
             }
@@ -668,6 +759,7 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
         }
 
         function ReadMyCookies() {
+            LogCookies("At ReadMyCookies() start.");
             var cookies = {};
 
             Object.keys(cookieDefaults).forEach(key => {
@@ -677,6 +769,13 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
             Object.keys(cookieDefaultsArrays).forEach(key =>{
                 cookies[key] = getStringArrayCookieOrDefault(key);
             });
+
+            Object.keys(config.constants.toggleButtons).forEach(buttonId => {
+                const buttonConfig = config.constants.toggleButtons[buttonId];
+                cookies[buttonConfig.cookie] = getCookieOrDefault(buttonConfig.cookie);
+            });
+
+            LogCookies("At ReadMyCookies() end.");
 
             return cookies;
         }
@@ -713,9 +812,12 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
             logMessage(`LogCookies(${reason}) starting`);
             logMessage(`Cookies: ${JSON.stringify(getAllCookies(), null, 2)}`);
             logMessage(`Current cookies in memory: ${JSON.stringify(myCookies, null, 2)}`);
+            logMessage(`LogCookies(${reason}) completed`);
         }
 
-        function InitializeDetailsToggles() {
+        function InitializeToggles() {
+            logMessage("InitializeToggles() starting...");
+
             const detailsIds = [
                 "guideDetails",
                 "standardWorkflowLinksDetails",
@@ -725,21 +827,109 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
 
             detailsIds.forEach(id => {
                 const details = document.getElementById(id);
+
+                if (!details) {
+                    logMessage(
+                        `Details element with ID '${id}' not found.`
+                    );
+                    return;
+                }
+
                 const cookieName = `${id}Collapsed`;
-                const isCollapsed = myCookies[cookieName] === "true" || myCookies[cookieName] === true;
 
-                // Set the initial state based on the cookie
-                details.open = !isCollapsed;
+                const isCollapsed =
+                    myCookies[cookieName] === "true" ||
+                    myCookies[cookieName] === true;
 
-                // Add an event listener to update the cookie when toggled
-                details.addEventListener('toggle', (event) => {
-                    if (details.open) {
-                        setCookie(`${id}Collapsed`, false, true);
-                    } else {
-                        setCookie(`${id}Collapsed`, true, true);
+                const shouldBeOpen = !isCollapsed;
+
+                /*
+                * Changing details.open causes the browser to queue a
+                * "toggle" event.
+                *
+                * Remember whether we're actually changing it so that the
+                * resulting initialization event can be ignored.
+                */
+                const initialStateChanged =
+                    details.open !== shouldBeOpen;
+
+                details.open = shouldBeOpen;
+
+                /*
+                * This variable belongs to this particular listener.
+                * If setting .open above generated a toggle event, ignore
+                * that first event.
+                */
+                let ignoreNextToggle = initialStateChanged;
+
+                queueAddEventListener(
+                    details.id,
+                    "toggle",
+                    () => {
+
+                        if (ignoreNextToggle) {
+                            ignoreNextToggle = false;
+
+                            logMessage(
+                                `Ignoring initialization toggle for '${id}'.`
+                            );
+
+                            return;
+                        }
+
+                        logMessage(
+                            `Details element with ID '${id}' toggled. ` +
+                            `New state: ${
+                                details.open
+                                    ? "open"
+                                    : "collapsed"
+                            }`
+                        );
+
+                        setCookie(
+                            `${id}Collapsed`,
+                            !details.open,
+                            true
+                        );
+
+                        logMessage(
+                            `After setting cookie for details element ` +
+                            `with ID '${id}'`
+                        );
                     }
-                });
+                );
             });
+
+            logMessage(
+                "Setting toggle button states based on cookies..."
+            );
+
+            Object.keys(
+                config.constants.toggleButtons
+            ).forEach(buttonId => {
+
+                logMessage(
+                    `Setting state for button: ${buttonId} ` +
+                    `with cookie: ` +
+                    `${config.constants.toggleButtons[buttonId].cookie}`
+                );
+
+                const button =
+                    document.getElementById(buttonId);
+
+                const cookieName =
+                    config.constants.toggleButtons[buttonId].cookie;
+
+                const cookie =
+                    myCookies[cookieName];
+
+                button.innerText =
+                    cookie === "true" || cookie === true
+                        ? config.constants.toggleButtons[buttonId].true
+                        : config.constants.toggleButtons[buttonId].false;
+            });
+
+            logMessage("InitializeToggles() completed.");
         }
 
         function generateTables(){
@@ -793,23 +983,55 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
 
         function Load()
         {
-            LogCookies("Load(): starting...");
+            logMessage("Load(): starting...");
             myCookies = ReadMyCookies();
-            InitializeDetailsToggles();
-            LogCookies("Load(): after ReadMyCookies()");
-
+            InitializeToggles();
+            logMessage("Load(): after ReadMyCookies()");
             generateTables();
         }
 
+        function toggleButton(id) {
+            logMessage(`toggleButton('${id}') starting...`);
+            const cookieName = config.constants.toggleButtons[id].cookie;
+            const buttonConstant = config.constants.toggleButtons[id];
+            const currentValue = myCookies[cookieName] === "true" || myCookies[cookieName] === true;
+            const newValue = !currentValue;
+            const button = document.getElementById(id);
+
+            logMessage(`Current value of cookie '${cookieName}': ${currentValue}`);
+            logMessage(`New value to set for cookie '${cookieName}': ${newValue}`);
+            logMessage(`Button text before change: '${id}': ${button ? button.innerText : "N/A"}`);
+
+            button.innerText = newValue ?
+                                config.constants.toggleButtons[id].true :
+                                config.constants.toggleButtons[id].false;
+
+            logMessage(`Button text after change: '${id}': ${button ? button.innerText : "N/A"}`);
+
+            setCookie(cookieName, newValue, true);
+            LogCookies(`${cookieName} set to ${newValue}`);
+            logMessage(`toggleButton('${id}') completed.`);
+        }
+
         function OnLoad() {
+            logMessage("OnLoad() starting...");
+
             Load();
-            QueueAndAttachEventListener("buttonSetDefaults", "click", () => {
-                LogCookies("Before setCookieDefaults()");
+
+            queueAddEventListener("buttonSetDefaults", "click", () => {
                 setCookieDefaults();
-                LogCookies("After setCookieDefaults()");
                 Load();
-            });            
-            QueueAndAttachEventListener("cbTimeMode", "change", (event) => {
+            });
+
+            // add all of the toggle buttons to the event queue
+            Object.keys(config.constants.toggleButtons).forEach(buttonId => {
+                queueAddEventListener(buttonId, "click", () => {
+                    toggleButton(buttonId);
+                    Load();
+                });
+            });
+        
+            queueAddEventListener("cbTimeMode", "change", (event) => {
                 if (event.target.checked) {
                     setCookie("autoUpdateTimeMode", "update");
                     logMessage("time mode set to auto update");
@@ -819,56 +1041,88 @@ Disclaimer: No warranties are provided as to whether or not this will work well 
                 }
                 Load();
             });
-const checkbox = document.getElementById('myCheckbox');
 
-checkbox.addEventListener('change', (event) => {
-  if (event.target.checked) {
-    console.log("Checkbox is checked! ✅");
-    // Run code for 'ON' state
-  } else {
-    console.log("Checkbox is unchecked! ❌");
-    // Run code for 'OFF' state
-  }
-});
-
-
+            attachQueuedEventListeners();
         }
 
+        // Queue and attach event listeners to elements, ensuring they are added after the DOM is fully loaded
         function QueueAndAttachEventListener(elementId, eventType, callback) {
             queueAddEventListener(elementId, eventType, callback);
             attachQueuedEventListeners();
         }
 
+        // Queue an event listener to be attached later.
         function queueAddEventListener(elementId, eventType, callback) {
-            eventListenersToAdd.push({ elementId, eventType, callback });
+            eventListenersToAdd.push({
+                elementId,
+                eventType,
+                callback
+            });
         }
 
+
+        // Attach all queued event listeners.
+        //Re-attaching replaces the old one.
         function attachQueuedEventListeners() {
-            try{
+            try {
                 eventListenersToAdd.forEach(listener => {
-                    const { elementId, eventType, callback } = listener;
+                    const {
+                        elementId,
+                        eventType,
+                        callback
+                    } = listener;
+
                     const element = document.getElementById(elementId);
-                    if (element) {
-                        element.addEventListener(eventType, callback);
-                        //logMessage(`Event listener for '${eventType}' added to element with ID '${elementId}'.`);
-                    } else {
-                        logMessage(`Element with ID '${elementId}' not found.`);
+
+                    if (!element) {
+                        logMessage(
+                            `Element with ID '${elementId}' not found.`
+                        );
+                        return;
                     }
+
+                    if (!element._appEventListeners) {
+                        element._appEventListeners = new Map();
+                    }
+
+                    // One managed listener per event type per element
+                    const previousCallback =
+                        element._appEventListeners.get(eventType);
+
+                    if (previousCallback) {
+                        element.removeEventListener(
+                            eventType,
+                            previousCallback
+                        );
+                    }
+
+                    element.addEventListener(
+                        eventType,
+                        callback
+                    );
+
+                    element._appEventListeners.set(
+                        eventType,
+                        callback
+                    );
                 });
+
                 eventListenersToAdd = [];
             }
             catch (error) {
-                logMessage(`Error attaching event listeners: ${error.message}`);
+                logMessage(
+                    `Error attaching event listeners: ${error.message}`
+                );
             }
         }
-
         const debug = false; // Set to true to enable debug information, false to disable
         var log = "";
         var myCookies = {};
         var alertFlag = true;
         var eventListenersToAdd = [];
         var debugInfo = "";
-        const maxCookieAge = config.constants.find(constant => constant.name === "MAX_COOKIE_AGE_SECONDS").value;
+        const maxCookieAge = config.constants.MAX_COOKIE_AGE_SECONDS.value;
+        logMessage(`Max cookie age set to ${maxCookieAge} seconds (~${(maxCookieAge / 31536000).toFixed(2)} years)`);
         function logMessage(message) { 
             if(debug){
                 log += message + "\n";
